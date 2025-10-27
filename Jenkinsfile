@@ -1,8 +1,9 @@
+
 pipeline {
   agent any
   environment {
     IMAGE_NAME = "samarthlavre" // change this
-    CRED_ID    = "dockerhub-creds"                 // make sure this credential exists
+    CRED_ID    = "dockerhub-creds"                 // make sure this exists
     TAG        = "${env.BUILD_NUMBER}"
   }
 
@@ -10,24 +11,24 @@ pipeline {
     stage('Checkout') {
       steps {
         checkout scm
-        script {
-          echo "Workspace: ${pwd()}"
-        }
+        script { echo "Workspace: ${pwd()}" }
       }
     }
 
     stage('Detect pom.xml') {
       steps {
         script {
-          // uses Pipeline Utility Steps plugin (findFiles)
           def poms = findFiles(glob: '**/pom.xml')
           if (poms == null || poms.length == 0) {
             error "No pom.xml found in repository. Please ensure a Maven project exists."
           }
           def pomPath = poms[0].path
-          env.PROJECT_DIR = pomPath.replaceAll(/\/pom.xml$/, '')
-          if (env.PROJECT_DIR == '') {
+          // remove both forward and back slashes before 'pom.xml', handle root-case
+          def proj = pomPath.replaceAll(/(\/|\\)pom\.xml$/,'')
+          if (proj == null || proj.trim() == '') {
             env.PROJECT_DIR = '.'
+          } else {
+            env.PROJECT_DIR = proj
           }
           echo "Found pom.xml at: ${pomPath} -> project dir = ${env.PROJECT_DIR}"
         }
@@ -40,7 +41,8 @@ pipeline {
           if (isUnix()) {
             sh "mvn -f ${env.PROJECT_DIR}/pom.xml -B clean package -DskipTests=false"
           } else {
-            bat "\"%MAVEN_HOME%\\bin\\mvn\" -f \"${env.PROJECT_DIR}\\pom.xml\" -B clean package -DskipTests=false"
+            // use 'mvn' from PATH on Windows agent
+            bat "mvn -f \"${env.PROJECT_DIR}\\pom.xml\" -B clean package -DskipTests=false"
           }
         }
       }
@@ -55,11 +57,8 @@ pipeline {
     stage('Docker: build image') {
       steps {
         script {
-          if (isUnix()) {
-            sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
-          } else {
-            bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
-          }
+          if (isUnix()) { sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}" }
+          else { bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}" }
         }
       }
     }
@@ -72,12 +71,8 @@ pipeline {
               sh "echo $DH_PASS | docker login -u $DH_USER --password-stdin"
               sh "docker push ${IMAGE_NAME}:${TAG}"
             } else {
-              bat """
-                @echo %DH_PASS%>pw.txt
-                type pw.txt | docker login -u %DH_USER% --password-stdin
-                docker push ${IMAGE_NAME}:${TAG}
-                del pw.txt
-              """
+              bat "@echo %DH_PASS%>pw.txt & type pw.txt | docker login -u %DH_USER% --password-stdin & del pw.txt"
+              bat "docker push ${IMAGE_NAME}:${TAG}"
             }
           }
         }
@@ -88,29 +83,18 @@ pipeline {
       steps {
         script {
           if (isUnix()) {
-            sh """
-              docker stop myapp || true
-              docker rm myapp || true
-              docker run -d --name myapp -p 8080:8080 ${IMAGE_NAME}:${TAG}
-            """
+            sh "docker stop myapp || true; docker rm myapp || true; docker run -d --name myapp -p 8080:8080 ${IMAGE_NAME}:${TAG}"
           } else {
-            bat """
-              docker stop myapp || exit 0
-              docker rm myapp || exit 0
-              docker run -d --name myapp -p 8080:8080 ${IMAGE_NAME}:${TAG}
-            """
+            bat "docker stop myapp || exit 0 & docker rm myapp || exit 0 & docker run -d --name myapp -p 8080:8080 ${IMAGE_NAME}:${TAG}"
           }
         }
       }
     }
-  } // end stages
+  } // stages
 
   post {
-    success {
-      echo "Pipeline succeeded: ${IMAGE_NAME}:${TAG}"
-    }
-    failure {
-      echo "Pipeline failed"
-    }
+    success { echo "Pipeline succeeded: ${IMAGE_NAME}:${TAG}" }
+    failure { echo "Pipeline failed" }
   }
-} 
+}
+
