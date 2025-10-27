@@ -1,9 +1,9 @@
-
+@'
 pipeline {
   agent any
   environment {
     IMAGE_NAME = "samarthlavre" // change this
-    CRED_ID    = "dockerhub-creds"                 // make sure this exists
+    CRED_ID    = "dockerhub-creds"                 // ensure this credential exists in Jenkins
     TAG        = "${env.BUILD_NUMBER}"
   }
 
@@ -23,9 +23,10 @@ pipeline {
             error "No pom.xml found in repository. Please ensure a Maven project exists."
           }
           def pomPath = poms[0].path
-          // remove both forward and back slashes before 'pom.xml', handle root-case
-          def proj = pomPath.replaceAll(/(\/|\\)pom\.xml$/,'')
-          if (proj == null || proj.trim() == '') {
+          // remove optional leading slash/backslash and 'pom.xml' suffix
+          def proj = pomPath.replaceAll(/^(?:\.?(?:\/|\\)?)?(.*?)(?:[\/\\]?pom\.xml)$/, '$1')
+          // fallback: if proj empty or equals 'pom.xml' then use repo root
+          if (proj == null || proj.trim() == '' || proj.equalsIgnoreCase('pom.xml')) {
             env.PROJECT_DIR = '.'
           } else {
             env.PROJECT_DIR = proj
@@ -41,7 +42,6 @@ pipeline {
           if (isUnix()) {
             sh "mvn -f ${env.PROJECT_DIR}/pom.xml -B clean package -DskipTests=false"
           } else {
-            // use 'mvn' from PATH on Windows agent
             bat "mvn -f \"${env.PROJECT_DIR}\\pom.xml\" -B clean package -DskipTests=false"
           }
         }
@@ -97,4 +97,4 @@ pipeline {
     failure { echo "Pipeline failed" }
   }
 }
-
+'@ | Set-Content -Path .\Jenkinsfile -Encoding UTF8
