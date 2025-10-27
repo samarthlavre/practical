@@ -1,9 +1,8 @@
-
 pipeline {
   agent any
   environment {
-    IMAGE_NAME = "samarthlavre" // change this
-    CRED_ID    = "dockerhub-creds"                 // ensure this credential exists in Jenkins
+    IMAGE_NAME = "samarthlavre" // CHANGE this
+    CRED_ID    = "dockerhub-creds"                 // must exist in Jenkins
     TAG        = "${env.BUILD_NUMBER}"
   }
 
@@ -19,19 +18,15 @@ pipeline {
       steps {
         script {
           def poms = findFiles(glob: '**/pom.xml')
-          if (poms == null || poms.length == 0) {
+          if (!poms || poms.length == 0) {
             error "No pom.xml found in repository. Please ensure a Maven project exists."
           }
           def pomPath = poms[0].path
-          // remove optional leading slash/backslash and 'pom.xml' suffix
           def proj = pomPath.replaceAll(/^(?:\.?(?:\/|\\)?)?(.*?)(?:[\/\\]?pom\.xml)$/, '$1')
-          // fallback: if proj empty or equals 'pom.xml' then use repo root
-          if (proj == null || proj.trim() == '' || proj.equalsIgnoreCase('pom.xml')) {
-            env.PROJECT_DIR = '.'
-          } else {
-            env.PROJECT_DIR = proj
-          }
+          env.PROJECT_DIR = (proj == null || proj.trim() == '' || proj.equalsIgnoreCase('pom.xml')) ? '.' : proj
           echo "Found pom.xml at: ${pomPath} -> project dir = ${env.PROJECT_DIR}"
+          // normalized artifact/build dir
+          env.ARTIFACT_DIR = (env.PROJECT_DIR == '.' ? 'target' : "${env.PROJECT_DIR.replaceAll('\\\\','/')}/target")
         }
       }
     }
@@ -48,22 +43,43 @@ pipeline {
       }
       post {
         always {
-          archiveArtifacts artifacts: "${env.PROJECT_DIR}/target/*.jar", allowEmptyArchive: true, fingerprint: true
-          junit testResults: "${env.PROJECT_DIR}/target/surefire-reports/*.xml", allowEmptyResults: true
+          // use ARTIFACT_DIR to archive; allow empty so job doesn't fail on missing jars
+          archiveArtifacts artifacts: "${env.ARTIFACT_DIR}/*.jar", allowEmptyArchive: true, fingerprint: true
+          junit testResults: "${env.ARTIFACT_DIR}/surefire-reports/*.xml", allowEmptyResults: true
         }
       }
     }
 
-    stage('Docker: build image') {
+    stage('Docker: build image (if available)') {
       steps {
         script {
-          if (isUnix()) { sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}" }
-          else { bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}" }
+          def dockerAvailable = false
+          if (isUnix()) {
+            dockerAvailable = sh(script: "docker info >/dev/null 2>&1 && echo OK || echo NO", returnStdout: true).trim() == 'OK'
+          } else {
+            def out = bat(script: 'docker info >nul 2>&1 && @echo OK || @echo NO', returnStdout: true).trim()
+            dockerAvailable = out == 'OK'
+          }
+
+          if (!dockerAvailable) {
+            echo "Docker daemon NOT available on this agent — skipping Docker build/push. Start Docker on the agent or run Docker on another host."
+            currentBuild.description = "Docker skipped (not available)"
+            // mark a flag so downstream stages can skip
+            env.DOCKER_AVAILABLE = "false"
+          } else {
+            env.DOCKER_AVAILABLE = "true"
+            if (isUnix()) {
+              sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
+            } else {
+              bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
+            }
+          }
         }
       }
     }
 
-    stage('Docker: login & push') {
+    stage('Docker: login & push (if available)') {
+      when { expression { env.DOCKER_AVAILABLE == "true" } }
       steps {
         withCredentials([usernamePassword(credentialsId: env.CRED_ID, usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
           script {
@@ -80,6 +96,7 @@ pipeline {
     }
 
     stage('Deploy (run container on agent)') {
+      when { expression { env.DOCKER_AVAILABLE == "true" } }
       steps {
         script {
           if (isUnix()) {
@@ -90,11 +107,10 @@ pipeline {
         }
       }
     }
-  } // stages
+  }
 
   post {
     success { echo "Pipeline succeeded: ${IMAGE_NAME}:${TAG}" }
     failure { echo "Pipeline failed" }
   }
 }
-
