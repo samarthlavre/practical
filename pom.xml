@@ -1,9 +1,8 @@
-# 1. Create a minimal pom.xml
-@"
-<project xmlns=""http://maven.apache.org/POM/4.0.0""
-         xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance""
-         xsi:schemaLocation=""http://maven.apache.org/POM/4.0.0
-         http://maven.apache.org/xsd/maven-4.0.0.xsd"">
+
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.example.practical</groupId>
   <artifactId>practical-app</artifactId>
@@ -23,32 +22,4 @@
     </dependency>
   </dependencies>
 </project>
-"@ | Set-Content -Path .\pom.xml -Encoding UTF8
 
-# 2. Create the Java package folder and a simple App.java
-New-Item -ItemType Directory -Force -Path .\src\main\java\com\example\practical | Out-Null
-@"
-package com.example.practical;
-
-public class App {
-    public static void main(String[] args) {
-        System.out.println(""Hello from practical-app"");
-    }
-}
-"@ | Set-Content -Path .\src\main\java\com\example\practical\App.java -Encoding UTF8
-
-# 3. Create a simple JUnit test
-New-Item -ItemType Directory -Force -Path .\src\test\java\com\example\practical | Out-Null
-@"
-package com.example.practical;
-
-import org.junit.Test;
-import static org.junit.Assert.assertTrue;
-
-public class AppTest {
-    @Test
-    public void sampleTest() {
-        assertTrue(true);
-    }
-}
-"@ | Set-Content -Path .\src\test\java\com\example\practical\AppTest.java -Encoding UTF8
