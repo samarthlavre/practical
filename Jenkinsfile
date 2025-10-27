@@ -97,4 +97,4 @@ pipeline {
     failure { echo "Pipeline failed" }
   }
 }
-'@ | Set-Content -Path .\Jenkinsfile -Encoding UTF8
+
