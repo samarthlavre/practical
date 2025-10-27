@@ -1,8 +1,8 @@
 pipeline {
   agent any
   environment {
-    IMAGE_NAME = "samarthlavre" // CHANGE this
-    CRED_ID    = "dockerhub-creds"                 // must exist in Jenkins
+    IMAGE_NAME = "samarthlavre" // change this
+    CRED_ID    = "dockerhub-creds"                 // ensure this credential exists
     TAG        = "${env.BUILD_NUMBER}"
   }
 
@@ -25,7 +25,6 @@ pipeline {
           def proj = pomPath.replaceAll(/^(?:\.?(?:\/|\\)?)?(.*?)(?:[\/\\]?pom\.xml)$/, '$1')
           env.PROJECT_DIR = (proj == null || proj.trim() == '' || proj.equalsIgnoreCase('pom.xml')) ? '.' : proj
           echo "Found pom.xml at: ${pomPath} -> project dir = ${env.PROJECT_DIR}"
-          // normalized artifact/build dir
           env.ARTIFACT_DIR = (env.PROJECT_DIR == '.' ? 'target' : "${env.PROJECT_DIR.replaceAll('\\\\','/')}/target")
         }
       }
@@ -43,42 +42,41 @@ pipeline {
       }
       post {
         always {
-          // use ARTIFACT_DIR to archive; allow empty so job doesn't fail on missing jars
           archiveArtifacts artifacts: "${env.ARTIFACT_DIR}/*.jar", allowEmptyArchive: true, fingerprint: true
           junit testResults: "${env.ARTIFACT_DIR}/surefire-reports/*.xml", allowEmptyResults: true
         }
       }
     }
 
-    stage('Docker: build image (if available)') {
+    stage('Docker: detect') {
       steps {
         script {
-          def dockerAvailable = false
           if (isUnix()) {
-            dockerAvailable = sh(script: "docker info >/dev/null 2>&1 && echo OK || echo NO", returnStdout: true).trim() == 'OK'
+            def rc = sh(returnStatus: true, script: 'docker info >/dev/null 2>&1')
+            env.DOCKER_AVAILABLE = (rc == 0) ? "true" : "false"
           } else {
-            def out = bat(script: 'docker info >nul 2>&1 && @echo OK || @echo NO', returnStdout: true).trim()
-            dockerAvailable = out == 'OK'
+            def rc = bat(returnStatus: true, script: '@echo off & docker info >nul 2>&1')
+            env.DOCKER_AVAILABLE = (rc == 0) ? "true" : "false"
           }
+          echo "Docker available: ${env.DOCKER_AVAILABLE}"
+        }
+      }
+    }
 
-          if (!dockerAvailable) {
-            echo "Docker daemon NOT available on this agent — skipping Docker build/push. Start Docker on the agent or run Docker on another host."
-            currentBuild.description = "Docker skipped (not available)"
-            // mark a flag so downstream stages can skip
-            env.DOCKER_AVAILABLE = "false"
+    stage('Docker: build image') {
+      when { expression { env.DOCKER_AVAILABLE == "true" } }
+      steps {
+        script {
+          if (isUnix()) {
+            sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
           } else {
-            env.DOCKER_AVAILABLE = "true"
-            if (isUnix()) {
-              sh "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
-            } else {
-              bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
-            }
+            bat "docker build -t ${IMAGE_NAME}:${TAG} ${env.PROJECT_DIR}"
           }
         }
       }
     }
 
-    stage('Docker: login & push (if available)') {
+    stage('Docker: login & push') {
       when { expression { env.DOCKER_AVAILABLE == "true" } }
       steps {
         withCredentials([usernamePassword(credentialsId: env.CRED_ID, usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
@@ -95,7 +93,7 @@ pipeline {
       }
     }
 
-    stage('Deploy (run container on agent)') {
+    stage('Deploy (run container)') {
       when { expression { env.DOCKER_AVAILABLE == "true" } }
       steps {
         script {
