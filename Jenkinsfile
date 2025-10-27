@@ -1,4 +1,3 @@
-# create Jenkinsfile with a minimal pipeline
 @"
 pipeline {
   agent any
